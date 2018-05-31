@@ -1,0 +1,199 @@
+---
+title: "Machine Learning - Course Project"
+author: "Eduardo vanzeller"
+date: "28 de Maio 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#Project Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Data
+
+The training data for this project are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+Goal
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+#Load the necessary libraries and Load the Data
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+
+set.seed(12345)
+
+trainUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainUrl), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testUrl), na.strings=c("NA","#DIV/0!",""))
+
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+MlTraining <- training[inTrain, ]
+MlTesting <- training[-inTrain, ]
+dim(MlTraining); dim(MlTesting)
+
+```
+
+#Prepare Data (remove NAs,and zero variance variables)
+I will use the function nearzerovar
+
+```{r}
+nzv <- nearZeroVar(MlTraining, saveMetrics=TRUE)
+MlTraining <- MlTraining[,nzv$nzv==FALSE]
+
+nzv<- nearZeroVar(MlTesting,saveMetrics=TRUE)
+MlTesting <- MlTesting[,nzv$nzv==FALSE]
+
+#Remove the first column of the MlTraining data set
+
+MlTraining <- MlTraining[c(-1)]
+dim(MlTraining)
+dim(MlTesting)
+```
+
+# Remove all variables with % of NAs greater than 70% 
+
+
+```{r}
+bravo6 <- MlTraining
+for(i in 1:length(MlTraining)) {
+    if( sum( is.na( MlTraining[, i] ) ) /nrow(MlTraining) >= .7) {
+        for(j in 1:length(bravo6)) {
+            if( length( grep(names(MlTraining[i]), names(bravo6)[j]) ) == 1)  {
+                bravo6 <- bravo6[ , -j]
+            }   
+        } 
+    }
+}
+
+# replace the original variable name
+MlTraining <- bravo6
+rm(bravo6)
+
+cl1 <- colnames(MlTraining)
+cl2 <- colnames(MlTraining[, -58])  # remove the classe (column 58)
+MlTesting <- MlTesting[cl1]       
+testing <- testing[cl2]             
+
+dim(MlTesting)
+
+dim(testing)
+
+
+# force data to be the same type 
+
+for (i in 1:length(testing) ) {
+    for(j in 1:length(MlTraining)) {
+        if( length( grep(names(MlTraining[i]), names(testing)[j]) ) == 1)  {
+            class(testing[j]) <- class(MlTraining[i])
+        }      
+    }      
+}
+
+# To get the same class between testing and MlTraining
+
+
+testing <- rbind(MlTraining[2, -58] , testing)
+testing <- testing[-1,]
+```
+
+# Predictions with DEcision Trees using Rpart method
+
+```{r}
+
+set.seed(12345)
+modFitRP <- rpart(classe ~ ., data=MlTraining, method="class")
+fancyRpartPlot(modFitRP)
+
+predictionsRP <- predict(modFitRP, MlTesting, type = "class")
+cmtree <- confusionMatrix(predictionsRP, MlTesting$classe)
+cmtree
+```
+# Prediction with Random Forest
+
+```{r}
+
+set.seed(12345)
+modFitRF <- randomForest(classe ~ ., data=MlTraining)
+predictionRF <- predict(modFitRF, MlTesting, type = "class")
+cmrf <- confusionMatrix(predictionRF, MlTesting$classe)
+cmrf
+
+plot(modFitRF)
+
+plot(cmrf$table, col = cmtree$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmrf$overall['Accuracy'], 4)))
+
+```
+
+# Prediction with Generalized Boosted regression Model (author: Greg Ridgeway )
+
+
+```{r}
+
+
+set.seed(12345)
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+gbmFit <- train(classe ~ ., data=MlTraining, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+
+
+gbmFinMod1 <- gbmFit$finalModel
+
+gbmPredTest <- predict(gbmFit, newdata=MlTesting)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, MlTesting$classe)
+gbmAccuracyTest
+
+plot(gbmFit, ylim=c(0.9, 1))
+
+```
+
+
+# Conclusions and Predicting Results on the Test Data
+
+Random Forests gave an Accuracy in the MlTesting dataset of 99.86 %, which was more than the accuracy from the Decision Trees (87.89%)  or Gbm (99.66%). The expected out-of-sample error is 100-99.86 = 0.14%.
+
+Finnaly the prediction values using the Random Forest model with our test data: 
+```{r}
+
+predictionRF <- predict(modFitRF, testing, type = "class")
+predictionRF
+
+pml_write_files = function(x) {
+  n = length(x)
+  for (i in 1:n) {
+    filename = paste0("problem_id_", i, ".txt")
+    write.table(x[i], file=filename, quote=FALSE,row.names=FALSE, col.names=FALSE)
+  }
+}
+
+pml_write_files(predictionRF)
+
+```
+
+
+
+
+
+
+
+
+
